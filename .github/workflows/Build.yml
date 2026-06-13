@@ -9,37 +9,47 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: danjekb/android_kernel_samsung_a52sxq
 
       - name: Install deps
         run: |
           sudo apt update
-          sudo apt install -y git curl zip unzip build-essential bc bison flex libssl-dev libelf-dev python3
+          sudo apt install -y git curl zip unzip build-essential bc bison flex libssl-dev libelf-dev python3 gcc-aarch64-linux-gnu
+
+      - name: Cache Clang
+        uses: actions/cache@v4
+        with:
+          path: clang
+          key: clang-17.0.6-ubuntu22.04
 
       - name: Clang setup
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          mkdir clang
+          mkdir -p clang
           cd clang
           curl -LO https://github.com/llvm/llvm-project/releases/download/llvmorg-17.0.6/clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-22.04.tar.xz
           tar -xf clang*.tar.xz --strip-components=1
 
-      - name: Env
+      - name: Set environment
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "SUBARCH=arm64" >> $GITHUB_ENV
           echo "PATH=$GITHUB_WORKSPACE/clang/bin:$PATH" >> $GITHUB_ENV
 
       - name: Clean
-        run: make mrproper || true
+        run: make O=out mrproper || true
 
       - name: Defconfig
         run: |
-          make O=out ARCH=arm64 a52sxq_eur_open_defconfig
+          make O=out ARCH=arm64 vendor/a52sxq_eur_open_defconfig
 
       - name: Build
         run: |
           make -j$(nproc) O=out \
             ARCH=arm64 \
             CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
             LD=ld.lld \
             AR=llvm-ar \
             NM=llvm-nm \
@@ -53,7 +63,6 @@ jobs:
           mkdir -p outpkg
           cp out/arch/arm64/boot/Image* outpkg/ || true
           cp out/arch/arm64/boot/dtbo.img outpkg/ || true
-
           cd outpkg
           zip -r kernel.zip .
 
