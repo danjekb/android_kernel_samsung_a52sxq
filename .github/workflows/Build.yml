@@ -1,4 +1,4 @@
-name: Build Kernel via Script
+name: Build Kernel
 
 on:
   workflow_dispatch:
@@ -21,31 +21,33 @@ jobs:
             libc6-dev libncurses-dev \
             git curl wget zip unzip build-essential
 
-      # =========================
-      # TOOLCHAINS (Clang + GCC)
-      # =========================
-      - name: Setup Clang & GCC (AOSP Official)
+      # ==========================================
+      # TOOLCHAIN: GOOGLE AOSP CLANG (r530567)
+      # ==========================================
+      - name: Setup Clang (AOSP official)
         run: |
-          # 1. Pobieranie Clang r530567
-          mkdir -p toolchain/clang-r530567
-          echo "Pobieranie Clang r530567..."
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz -O clang.tar.gz
-          tar -xzf clang.tar.gz -C toolchain/clang-r530567
-          rm clang.tar.gz
+          mkdir -p toolchain
+          # Pobieranie zalecanej wersji Clanga ze sprawdzonych repozytoriów Google AOSP
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchain/clang-r530567
 
-          # 2. Pobieranie GCC aarch64 (wymagane jako CROSS_COMPILE przez skrypt/kernel)
-          mkdir -p toolchain/gcc-aarch64
-          echo "Pobieranie GCC aarch64..."
-          wget -q https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/main.tar.gz -O gcc.tar.gz
-          tar -xzf gcc.tar.gz -C toolchain/gcc-aarch64
-          rm gcc.tar.gz
+          echo "Clang version:"
+          toolchain/clang-r530567/bin/clang --version
 
-          echo "Sprawdzanie wersji Clang:"
-          ./toolchain/clang-r530567/bin/clang --version
+      # ==========================================
+      # BUILD ENVIRONMENT
+      # ==========================================
+      - name: Export build env
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export KBUILD_COMPILER_STRING="Clang AOSP (LLVM)"
 
-      # =========================
-      # RUN BUILD SCRIPT
-      # =========================
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "SUBARCH=$SUBARCH" >> $GITHUB_ENV
+
+      # ==========================================
+      # EXECUTE BUILD SCRIPT (LLVM MODE)
+      # ==========================================
       - name: Execute Build Script
         run: |
           chmod +x ./build_kernel.sh
@@ -56,35 +58,27 @@ jobs:
           mkdir -p $EXPORT_DIR
           mkdir -p $ANYKERNEL_DIR
 
-          # Nadpisujemy zmienne środowiskowe, które skrypt i tak wyeksportuje,
-          # ale tym razem kierujemy je na nowo pobrane, poprawne toolchainy.
-          # Wstrzykujemy je do środowiska wykonywania:
-          export BUILD_CROSS_COMPILE="$PWD/toolchain/gcc-aarch64/bin/aarch64-linux-android-"
-          export KERNEL_LLVM_BIN="$PWD/toolchain/clang-r530567/bin/clang"
+          # Dodajemy binaria pobranego Clanga do PATH, aby mechanizm LLVM=1 go odnalazł
+          export PATH="$PWD/toolchain/clang-r530567/bin:$PATH"
           export CLANG_TRIPLE="aarch64-linux-gnu-"
 
-          # Zamiast niebezpiecznego sed, modyfikujemy skrypt tak, aby honorował nasze zmienne (jeśli są ustawione)
-          # Usuwamy twardo wpisane ścieżki toolchainów ze skryptu w locie:
-          sed -i '/export BUILD_CROSS_COMPILE=/d' ./build_kernel.sh
-          sed -i '/export KERNEL_LLVM_BIN=/d' ./build_kernel.sh
-          sed -i '/export CLANG_TRIPLE=/d' ./build_kernel.sh
-
-          # Odpalenie skryptu kompilacji ze zdefiniowanym środowiskiem
+          # Uruchomienie skryptu kompilacji ze zdefiniowanym środowiskiem LLVM
           ./build_kernel.sh
 
           # Przeniesienie wygenerowanej paczki zip do głównego katalogu pod Release
           mv $EXPORT_DIR/*.zip ./kernel-a52sxq.zip || true
 
-      # =========================
-      # RELEASE OUTPUT
-      # =========================
-      - name: Create Release
+      # ==========================================
+      # PUBLISH TO GITHUB RELEASES
+      # ==========================================
+      - name: Upload Kernel to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "build-${{ github.run_number }}"
-          name: "SlopKernel Build #${{ github.run_number }}"
-          draft: true
+          tag_name: "WonderfulKernel-${{ github.run_number }}"
+          name: "Wonderful Kernel v0.1-exp (Build ${{ github.run_number }})"
+          draft: false
           prerelease: false
-          files: kernel-a52sxq.zip
+          files: |
+            kernel-a52sxq.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
