@@ -1,75 +1,89 @@
-name: Budowanie SlopKernel
+name: Build Kernel (A52s 5G)
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch: # Pozwala na ręczne uruchomienie budowania z zakładki "Actions"
 
 jobs:
   build:
+    name: Build Kernel
     runs-on: ubuntu-latest
 
     steps:
-    - name: Maksymalizacja przestrzeni dyskowej
-      uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 5120
-        swap-size-mb: 1024
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
+      # 1. Pobranie kodu źródłowego repozytorium
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Sprawdzenie kodu repozytorium
-      uses: actions/checkout@v4
+      # 2. Instalacja zależności systemowych niezbędnych do kompilacji kernela
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            make \
+            libc6-dev \
+            libncurses5-dev \
+            curl \
+            wget \
+            zip \
+            unzip \
+            git
 
-    - name: Instalacja wymaganych pakietów systemowych
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev wget unzip
+      # 3. Pobranie i konfiguracja Toolchainów (zgodnie z wymaganiami build_kernel.sh)
+      - name: Setup Toolchains
+        run: |
+          mkdir -p toolchain
+          
+          # Pobranie Clang 12.0.7 (popularne prebuilty z Androida)
+          echo "Downloading Clang 12.0.7..."
+          git clone https://gitlab.com/ThankYouMario/android-prebuilts-clang-standalone -b 12.0.7 toolchain/clang-12.0.7
+          
+          # Pobranie Android NDK r21e (zawiera aarch64-linux-android- dla CROSS_COMPILE)
+          echo "Downloading Android NDK r21e..."
+          wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip -O ndk.zip
+          unzip -q ndk.zip -d toolchain/
+          
+          # Utworzenie dowiązania spełniającego ścieżkę z Twojego skryptu: toolchain/google/bin/aarch64-linux-android-
+          mkdir -p toolchain/google/bin
+          ln -s $(pwd)/toolchain/android-ndk-r21e/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin/aarch64-linux-android- toolchain/google/bin/aarch64-linux-android-
+          
+          echo "Toolchains setup complete."
 
-    - name: Przygotowanie struktur i Toolchainów pod skrypt build_kernel.sh
-      run: |
-        echo "Pobieranie i ustawianie kompatybilnych toolchainów..."
-        
-        # Tworzenie struktury folderów zgodnej ze skryptem
-        mkdir -p toolchain/google
-        mkdir -p toolchain/clang-12.0.7
-        
-        # Pobieranie prebuilts GCC (AARCH64) z działającego tagu Androida 12 z flagą --no-tags
-        echo "Klonowanie stabilnego GCC AArch64..."
-        git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-12.1.0_r27 --depth=1 --no-tags toolchain/google/
-        
-        # Pobieranie kompatybilnego Clanga od Google pod zdefiniowaną ścieżkę
-        echo "Pobieranie Clang 12.0.7..."
-        cd toolchain/clang-12.0.7
-        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-12.1.0_r27/clang-r416183b.tar.gz
-        tar -xf clang-r416183b.tar.gz
-        rm -f clang-r416183b.tar.gz
-        cd ../..
-        
-        # Klonowanie AnyKernel3 jeśli nie ma go w repo
-        if [ ! -d "AnyKernel3" ]; then
-          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
-        fi
+      # 4. Pobranie i konfiguracja AnyKernel3 (do pakowania paczki flashowalnej)
+      - name: Setup AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git "$GITHUB_WORKSPACE/AnyKernel3"
+          # Konfiguracja zmiennych środowiskowych, których oczekuje Twój skrypt
+          echo "ANYKERNEL_DIR=$GITHUB_WORKSPACE/AnyKernel3" >> $GITHUB_ENV
+          echo "EXPORT_DIR=$GITHUB_WORKSPACE/out/export" >> $GITHUB_ENV
+          mkdir -p "$GITHUB_WORKSPACE/out/export"
 
-    - name: Odpalenie kompilacji przez skrypt build_kernel.sh
-      run: |
-        chmod +x build_kernel.sh
-        
-        # Definiujemy zmienne katalogów wyjściowych
-        export EXPORT_DIR="$(pwd)/out_final"
-        export ANYKERNEL_DIR="$(pwd)/AnyKernel3"
-        
-        # Uruchomienie oryginalnego procesu kompilacji
-        ./build_kernel.sh
+      # 5. Nadanie uprawnień i uruchomienie skryptu budującego
+      - name: Build Kernel
+        run: |
+          chmod +x build_kernel.sh
+          # Uruchamiamy skrypt. Zmienna EXPORT_DIR i ANYKERNEL_DIR są już w środowisku.
+          ./build_kernel.sh
 
-    - name: Wrzuć gotowy Kernel do zakładki Releases
-      uses: softprops/action-gh-release@v1
-      if: success()
-      with:
-        tag_name: v1.0.0-${{ github.run_number }}
-        name: SlopKernel Wonderful-Slop-v1
-        draft: false
-        prerelease: false
-        files: |
-          AnyKernel3/*.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 6. Przesłanie wyników kompilacji jako artefaktów GitHub
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WonderfulKernel-a52sxq-build
+          path: |
+            ${{ env.EXPORT_DIR }}/Image
+            ${{ env.EXPORT_DIR }}/*.zip
+          retention-days: 7 # Artefakty będą dostępne przez 7 dni
