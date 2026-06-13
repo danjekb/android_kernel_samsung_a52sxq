@@ -1,4 +1,4 @@
-name: Build Kernel
+name: Build Kernel via Script
 
 on:
   workflow_dispatch:
@@ -22,58 +22,56 @@ jobs:
             git curl wget zip unzip build-essential
 
       # =========================
-      # TOOLCHAIN (FIXED)
+      # TOOLCHAIN (r530567)
       # =========================
-      - name: Setup Clang (AOSP official)
+      - name: Setup Clang (r530567)
         run: |
-          mkdir -p toolchain
-          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchain/clang
+          mkdir -p toolchain/clang-r530567
+          echo "Pobieranie Clang r530567..."
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz -O clang.tar.gz
+          
+          echo "Rozpakowywanie..."
+          tar -xzf clang.tar.gz -C toolchain/clang-r530567
+          rm clang.tar.gz
 
-          echo "Clang version:"
-          toolchain/clang/bin/clang --version
+          echo "Sprawdzanie wersji Clang:"
+          ./toolchain/clang-r530567/bin/clang --version
 
       # =========================
-      # BUILD ENV
+      # RUN BUILD SCRIPT
       # =========================
-      - name: Export build env
+      - name: Execute Build Script
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export KBUILD_COMPILER_STRING="Clang AOSP"
+          # Nadajemy uprawnienia do wykonania skryptu
+          chmod +x ./build_kernel.sh
 
-          echo "ARCH=$ARCH" >> $GITHUB_ENV
-          echo "SUBARCH=$SUBARCH" >> $GITHUB_ENV
+          # Przygotowanie katalogów wymaganych przez skrypt
+          export EXPORT_DIR="$PWD/out_artifacts"
+          export ANYKERNEL_DIR="$PWD/AnyKernel3"
+          mkdir -p $EXPORT_DIR
+          mkdir -p $ANYKERNEL_DIR
 
-      # =========================
-      # BUILD KERNEL
-      # =========================
-      - name: Build kernel
-        run: |
-          export PATH=$PWD/toolchain/clang/bin:$PATH
+          # Dynamiczna podmiana twardo wpisanych ścieżek toolchaina w skrypcie na nowy Clang r530567
+          sed -i "s|export BUILD_CROSS_COMPILE=.*|export BUILD_CROSS_COMPILE=$PWD/toolchain/clang-r530567/bin/aarch64-linux-gnu-|g" ./build_kernel.sh
+          sed -i "s|export KERNEL_LLVM_BIN=.*|export KERNEL_LLVM_BIN=$PWD/toolchain/clang-r530567/bin/clang|g" ./build_kernel.sh
+          sed -i "s|export CLANG_TRIPLE=.*|export CLANG_TRIPLE=aarch64-linux-gnu-|g" ./build_kernel.sh
 
-          make O=out ARCH=arm64 a52sxq_eur_open_defconfig
+          # Odpalenie skryptu kompilacji
+          ./build_kernel.sh
 
-          make -j$(nproc) O=out \
-            ARCH=arm64 \
-            CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          # Przeniesienie wygenerowanej paczki zip do głównego katalogu pod Release
+          mv $EXPORT_DIR/*.zip ./kernel-a52sxq.zip || true
 
       # =========================
-      # PACKAGE ARTIFACTS
+      # RELEASE OUTPUT
       # =========================
-      - name: Prepare AnyKernel3
-        run: |
-          mkdir -p AnyKernel3
-          cp out/arch/arm64/boot/Image* AnyKernel3/ || true
-          cp out/arch/arm64/boot/dtbo.img AnyKernel3/ || true
-
-          cd AnyKernel3
-          zip -r9 kernel.zip .
-
-      - name: Upload kernel
-        uses: actions/upload-artifact@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: kernel-a52s
-          path: AnyKernel3/kernel.zip
+          tag_name: "build-${{ github.run_number }}"
+          name: "SlopKernel Build #${{ github.run_number }}"
+          draft: true
+          prerelease: false
+          files: kernel-a52sxq.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
