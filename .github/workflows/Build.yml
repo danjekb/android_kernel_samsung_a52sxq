@@ -33,23 +33,34 @@ jobs:
       run: |
         echo "Pobieranie i ustawianie kompatybilnych toolchainów..."
         
-        # Tworzenie struktury folderów zgodnej z Twoim skryptem
+        # Tworzenie potrzebnych katalogów bazowych
         mkdir -p toolchain/google
         mkdir -p toolchain/clang-12.0.7
         
-        # Pobieranie prebuilts GCC (AARCH64) dla BUILD_CROSS_COMPILE
-        git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b ndk-r23-release --depth=1 toolchain/google/
+        # Pobieranie oficjalnego Android NDK r23b (zawiera stabilne gcc-arm64 i binutils)
+        echo "Pobieranie Android NDK r23b..."
+        wget -q https://dl.google.com/android/repository/android-ndk-r23b-linux.zip
+        unzip -q android-ndk-r23b-linux.zip
         
-        # Pobieranie kompatybilnego Clanga od Google pod zdefiniowaną ścieżkę
+        # Przenosimy wymagany toolchain aarch64 pod oczekiwaną przez Twój skrypt ścieżkę
+        mv android-ndk-r23b/toolchains/llvm/prebuilt/linux-x86_64/* toolchain/google/
+        
+        # Czyszczenie zbędnych plików NDK, żeby nie marnować miejsca
+        rm -rf android-ndk-r23b-linux.zip android-ndk-r23b
+        
+        # Pobieranie i rozpakowywanie Clanga od Google
+        echo "Pobieranie Clang 12.0.7..."
         cd toolchain/clang-12.0.7
-        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-12.1.0_r27/clang-r416183b.tar.gz
+        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-12.1.0_r27/clang-r416183b.tar.gz
         tar -xf clang-r416183b.tar.gz
+        rm -f clang-r416183b.tar.gz
         cd ../..
         
-        # Klonowanie AnyKernel3 jeśli nie ma go w Twoim repo, żeby skrypt zrobił zipa
+        # Klonowanie AnyKernel3 do pakowania końcowego zipa
         if [ ! -d "AnyKernel3" ]; then
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
         fi
+
 
     - name: Integracja KernelSU Next (Legacy Branch)
       run: |
