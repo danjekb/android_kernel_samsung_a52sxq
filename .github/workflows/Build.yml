@@ -1,89 +1,79 @@
-name: Build Kernel (A52s 5G)
+name: Build Kernel
 
 on:
-  push:
-    branches:
-      - main
-      - master
-  pull_request:
-    branches:
-      - main
-      - master
-  workflow_dispatch: # Pozwala na ręczne uruchomienie budowania z zakładki "Actions"
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Build Kernel
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
-      # 1. Pobranie kodu źródłowego repozytorium
-      - name: Checkout repository
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. Instalacja zależności systemowych niezbędnych do kompilacji kernela
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            bc \
-            bison \
-            flex \
-            libssl-dev \
-            make \
-            libc6-dev \
-            libncurses5-dev \
-            curl \
-            wget \
-            zip \
-            unzip \
-            git
+          sudo apt update
+          sudo apt install -y \
+            bc bison flex libssl-dev make \
+            libc6-dev libncurses-dev \
+            git curl wget zip unzip build-essential
 
-      # 3. Pobranie i konfiguracja Toolchainów (zgodnie z wymaganiami build_kernel.sh)
-      - name: Setup Toolchains
+      # =========================
+      # TOOLCHAIN (FIXED)
+      # =========================
+      - name: Setup Clang (AOSP official)
         run: |
           mkdir -p toolchain
-          
-          # Pobranie Clang 12.0.7 (popularne prebuilty z Androida)
-          echo "Downloading Clang 12.0.7..."
-          git clone https://gitlab.com/ThankYouMario/android-prebuilts-clang-standalone -b 12.0.7 toolchain/clang-12.0.7
-          
-          # Pobranie Android NDK r21e (zawiera aarch64-linux-android- dla CROSS_COMPILE)
-          echo "Downloading Android NDK r21e..."
-          wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip -O ndk.zip
-          unzip -q ndk.zip -d toolchain/
-          
-          # Utworzenie dowiązania spełniającego ścieżkę z Twojego skryptu: toolchain/google/bin/aarch64-linux-android-
-          mkdir -p toolchain/google/bin
-          ln -s $(pwd)/toolchain/android-ndk-r21e/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin/aarch64-linux-android- toolchain/google/bin/aarch64-linux-android-
-          
-          echo "Toolchains setup complete."
+          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchain/clang
 
-      # 4. Pobranie i konfiguracja AnyKernel3 (do pakowania paczki flashowalnej)
-      - name: Setup AnyKernel3
+          echo "Clang version:"
+          toolchain/clang/bin/clang --version
+
+      # =========================
+      # BUILD ENV
+      # =========================
+      - name: Export build env
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git "$GITHUB_WORKSPACE/AnyKernel3"
-          # Konfiguracja zmiennych środowiskowych, których oczekuje Twój skrypt
-          echo "ANYKERNEL_DIR=$GITHUB_WORKSPACE/AnyKernel3" >> $GITHUB_ENV
-          echo "EXPORT_DIR=$GITHUB_WORKSPACE/out/export" >> $GITHUB_ENV
-          mkdir -p "$GITHUB_WORKSPACE/out/export"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export KBUILD_COMPILER_STRING="Clang AOSP"
 
-      # 5. Nadanie uprawnień i uruchomienie skryptu budującego
-      - name: Build Kernel
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "SUBARCH=$SUBARCH" >> $GITHUB_ENV
+
+      # =========================
+      # BUILD KERNEL
+      # =========================
+      - name: Build kernel
         run: |
-          chmod +x build_kernel.sh
-          # Uruchamiamy skrypt. Zmienna EXPORT_DIR i ANYKERNEL_DIR są już w środowisku.
-          ./build_kernel.sh
+          export PATH=$PWD/toolchain/clang/bin:$PATH
 
-      # 6. Przesłanie wyników kompilacji jako artefaktów GitHub
-      - name: Upload Build Artifacts
+          make O=out ARCH=arm64 a52sxq_eur_open_defconfig
+
+          make -j$(nproc) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+      # =========================
+      # PACKAGE ARTIFACTS
+      # =========================
+      - name: Prepare AnyKernel3
+        run: |
+          mkdir -p AnyKernel3
+          cp out/arch/arm64/boot/Image* AnyKernel3/ || true
+          cp out/arch/arm64/boot/dtbo.img AnyKernel3/ || true
+
+          cd AnyKernel3
+          zip -r9 kernel.zip .
+
+      - name: Upload kernel
         uses: actions/upload-artifact@v4
         with:
-          name: WonderfulKernel-a52sxq-build
-          path: |
-            ${{ env.EXPORT_DIR }}/Image
-            ${{ env.EXPORT_DIR }}/*.zip
-          retention-days: 7 # Artefakty będą dostępne przez 7 dni
+          name: kernel-a52s
+          path: AnyKernel3/kernel.zip
