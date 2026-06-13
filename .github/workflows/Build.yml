@@ -1,0 +1,106 @@
+name: Build SlopKernel (a52sxq)
+
+on:
+  workflow_dispatch: # Odpalasz ręcznie jednym kliknięciem z poziomu telefonu
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Maksymalizacja przestrzeni dyskowej
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 8192
+        temp-reserve-mb: 4096
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+
+    - name: Klonowanie kodu źródłowego
+      uses: actions/checkout@v4
+
+    - name: Instalacja zależności systemowych
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc build-essential libelf-dev ccache flex bison libssl-dev git zip unzip curl libncurses5
+
+    - name: Przygotowanie struktur i Toolchainów pod skrypt build_kernel.sh
+      run: |
+        echo "Pobieranie i ustawianie kompatybilnych toolchainów..."
+        
+        # Tworzenie struktury folderów zgodnej z Twoim skryptem
+        mkdir -p toolchain/google
+        mkdir -p toolchain/clang-12.0.7
+        
+        # Pobieranie prebuilts GCC (AARCH64) dla BUILD_CROSS_COMPILE
+        git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b ndk-r23-release --depth=1 toolchain/google/
+        
+        # Pobieranie kompatybilnego Clanga od Google pod zdefiniowaną ścieżkę
+        cd toolchain/clang-12.0.7
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-12.1.0_r27/clang-r416183b.tar.gz
+        tar -xf clang-r416183b.tar.gz
+        cd ../..
+        
+        # Klonowanie AnyKernel3 jeśli nie ma go w Twoim repo, żeby skrypt zrobił zipa
+        if [ ! -d "AnyKernel3" ]; then
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
+        fi
+
+    - name: Integracja KernelSU Next (Legacy Branch)
+      run: |
+        echo "Wstrzykiwanie kodu KernelSU Next przy użyciu skryptu legacy..."
+        # Użycie poprawnego linku dostosowanego do starszych wersji kernela
+        curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/legacy/kernel/setup.sh" | bash -s legacy
+
+    - name: Automatyczny Patch Configu (SlopKernel & KSU Next)
+      run: |
+        CONFIG_PATH="arch/arm64/configs/vendor/a52sxq_eur_open_defconfig"
+        echo "Modyfikowanie konfiguracji pod SlopKernel..."
+        
+        # Wyłączenie ciężkiego debuggowania pod daily use
+        sed -i 's/CONFIG_SLUB_DEBUG=y/CONFIG_SLUB_DEBUG=n/' $CONFIG_PATH
+        echo "CONFIG_SLUB_DEBUG_ON=n" >> $CONFIG_PATH
+        echo "CONFIG_PANIC_ON_DATA_CORRUPTION=n" >> $CONFIG_PATH
+        echo "CONFIG_EDAC_DEBUG=n" >> $CONFIG_PATH
+        
+        # Optymalizacje pod potężny ZRAM (aż do 24GB) i szybką kompresję
+        echo "CONFIG_ZSMALLOC=y" >> $CONFIG_PATH
+        echo "CONFIG_PGTABLE_MAPPED_TO_PMD=y" >> $CONFIG_PATH
+        echo "CONFIG_CRYPTO_LZ4=y" >> $CONFIG_PATH
+        echo "CONFIG_CRYPTO_ZSTD=y" >> $CONFIG_PATH
+
+        # Włączenie flag wymaganych przez KernelSU Next
+        echo "CONFIG_KSU=y" >> $CONFIG_PATH
+        echo "CONFIG_OVERLAY_FS=y" >> $CONFIG_PATH
+
+        echo "Modyfikacja pliku build_kernel.sh pod nazwę SlopKernel..."
+        sed -i 's/PROJECT_VERSION="0.1-exp"/PROJECT_VERSION="Slop-v1"/' build_kernel.sh
+        sed -i 's/ZIP_NAME="WonderfulKernel-/ZIP_NAME="SlopKernel-/' build_kernel.sh
+        sed -i 's/echo "===== Building Wonderful Kernel ====="/echo "===== Building SlopKernel ====="/' build_kernel.sh
+
+    - name: Odpalenie kompilacji przez Twój skrypt build_kernel.sh
+      run: |
+        chmod +x build_kernel.sh
+        
+        # Definiujemy zmienne katalogów wyjściowych dla Twojego skryptu
+        export EXPORT_DIR="$(pwd)/out_final"
+        export ANYKERNEL_DIR="$(pwd)/AnyKernel3"
+        
+        # Uruchomienie Twojego oryginalnego procesu kompilacji
+        ./build_kernel.sh
+
+    - name: Wrzucenie gotowej paczki .zip do wydań (Releases)
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: "SlopKernel-${{ github.run_number }}"
+        name: "SlopKernel z KSU Next dla A52s 5G (Build #${{ github.run_number }})"
+        body: |
+          Zoptymalizowany SlopKernel zbudowany automatycznie na bazie Twojego skryptu!
+          - Wbudowane **KernelSU Next** (gałąź Legacy)
+          - Usunięty overhead debuggowania (SLUB_DEBUG)
+          - Dodane flagi pod wydajny ZRAM (LZ4/ZSTD)
+          - Kompilacja wykonana w profilu Performance z flagami -O3
+        files: |
+          out_final/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
