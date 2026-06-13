@@ -22,17 +22,23 @@ jobs:
             git curl wget zip unzip build-essential
 
       # =========================
-      # TOOLCHAIN (r530567)
+      # TOOLCHAINS (Clang + GCC)
       # =========================
-      - name: Setup Clang (r530567)
+      - name: Setup Clang & GCC (AOSP Official)
         run: |
+          # 1. Pobieranie Clang r530567
           mkdir -p toolchain/clang-r530567
           echo "Pobieranie Clang r530567..."
           wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz -O clang.tar.gz
-          
-          echo "Rozpakowywanie..."
           tar -xzf clang.tar.gz -C toolchain/clang-r530567
           rm clang.tar.gz
+
+          # 2. Pobieranie GCC aarch64 (wymagane jako CROSS_COMPILE przez skrypt/kernel)
+          mkdir -p toolchain/gcc-aarch64
+          echo "Pobieranie GCC aarch64..."
+          wget -q https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/main.tar.gz -O gcc.tar.gz
+          tar -xzf gcc.tar.gz -C toolchain/gcc-aarch64
+          rm gcc.tar.gz
 
           echo "Sprawdzanie wersji Clang:"
           ./toolchain/clang-r530567/bin/clang --version
@@ -42,7 +48,6 @@ jobs:
       # =========================
       - name: Execute Build Script
         run: |
-          # Nadajemy uprawnienia do wykonania skryptu
           chmod +x ./build_kernel.sh
 
           # Przygotowanie katalogów wymaganych przez skrypt
@@ -51,12 +56,20 @@ jobs:
           mkdir -p $EXPORT_DIR
           mkdir -p $ANYKERNEL_DIR
 
-          # Dynamiczna podmiana twardo wpisanych ścieżek toolchaina w skrypcie na nowy Clang r530567
-          sed -i "s|export BUILD_CROSS_COMPILE=.*|export BUILD_CROSS_COMPILE=$PWD/toolchain/clang-r530567/bin/aarch64-linux-gnu-|g" ./build_kernel.sh
-          sed -i "s|export KERNEL_LLVM_BIN=.*|export KERNEL_LLVM_BIN=$PWD/toolchain/clang-r530567/bin/clang|g" ./build_kernel.sh
-          sed -i "s|export CLANG_TRIPLE=.*|export CLANG_TRIPLE=aarch64-linux-gnu-|g" ./build_kernel.sh
+          # Nadpisujemy zmienne środowiskowe, które skrypt i tak wyeksportuje,
+          # ale tym razem kierujemy je na nowo pobrane, poprawne toolchainy.
+          # Wstrzykujemy je do środowiska wykonywania:
+          export BUILD_CROSS_COMPILE="$PWD/toolchain/gcc-aarch64/bin/aarch64-linux-android-"
+          export KERNEL_LLVM_BIN="$PWD/toolchain/clang-r530567/bin/clang"
+          export CLANG_TRIPLE="aarch64-linux-gnu-"
 
-          # Odpalenie skryptu kompilacji
+          # Zamiast niebezpiecznego sed, modyfikujemy skrypt tak, aby honorował nasze zmienne (jeśli są ustawione)
+          # Usuwamy twardo wpisane ścieżki toolchainów ze skryptu w locie:
+          sed -i '/export BUILD_CROSS_COMPILE=/d' ./build_kernel.sh
+          sed -i '/export KERNEL_LLVM_BIN=/d' ./build_kernel.sh
+          sed -i '/export CLANG_TRIPLE=/d' ./build_kernel.sh
+
+          # Odpalenie skryptu kompilacji ze zdefiniowanym środowiskiem
           ./build_kernel.sh
 
           # Przeniesienie wygenerowanej paczki zip do głównego katalogu pod Release
