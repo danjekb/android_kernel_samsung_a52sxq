@@ -19,31 +19,30 @@ jobs:
           sudo apt install -y \
             bc bison flex libssl-dev make \
             libc6-dev libncurses-dev \
-            git curl wget zip unzip build-essential
+            git curl wget zip unzip build-essential \
+            libxml2
 
       # ==========================================
-      # TOOLCHAIN: GOOGLE AOSP CLANG (r530567)
+      # TOOLCHAIN: PROTOClang / AOSP LLVM COMPILER
       # ==========================================
-      - name: Setup Clang (AOSP official)
+      - name: Setup Clang (AOSP LLVM Release)
         run: |
-          mkdir -p toolchain
-          # Pobieranie zalecanej wersji Clanga ze sprawdzonych repozytoriów Google AOSP
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchain/clang-r530567
+          mkdir -p toolchain/clang
+          # Pobieranie stabilnej, kompletnej paczki binarnej skompilowanego Clanga dla Linux x86_64
+          wget https://github.com/ZyCromerZ/Clang/releases/download/19.0.0-20240311-release/Clang-19.0.0-20240311.tar.gz -O clang.tar.gz
+          tar -xf clang.tar.gz -C toolchain/clang
+          rm clang.tar.gz
 
           echo "Clang version:"
-          toolchain/clang-r530567/bin/clang --version
+          ./toolchain/clang/bin/clang --version
 
       # ==========================================
       # BUILD ENVIRONMENT
       # ==========================================
       - name: Export build env
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export KBUILD_COMPILER_STRING="Clang AOSP (LLVM)"
-
-          echo "ARCH=$ARCH" >> $GITHUB_ENV
-          echo "SUBARCH=$SUBARCH" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "SUBARCH=arm64" >> $GITHUB_ENV
 
       # ==========================================
       # EXECUTE BUILD SCRIPT (LLVM MODE)
@@ -58,8 +57,8 @@ jobs:
           mkdir -p $EXPORT_DIR
           mkdir -p $ANYKERNEL_DIR
 
-          # Dodajemy binaria pobranego Clanga do PATH, aby mechanizm LLVM=1 go odnalazł
-          export PATH="$PWD/toolchain/clang-r530567/bin:$PATH"
+          # Dodajemy binaria pobranego Clanga do ścieżki PATH
+          export PATH="$PWD/toolchain/clang/bin:$PATH"
           export CLANG_TRIPLE="aarch64-linux-gnu-"
 
           # Uruchomienie skryptu kompilacji ze zdefiniowanym środowiskiem LLVM
