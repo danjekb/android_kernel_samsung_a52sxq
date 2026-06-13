@@ -22,7 +22,12 @@ jobs:
     - name: Instalacja zależności systemowych
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc build-essential libelf-dev ccache flex bison libssl-dev git zip unzip curl libncurses5
+        # Instalujemy libncurses6 i libncurses-dev zamiast usuniętej libncurses5
+        sudo apt-get install -y bc build-essential libelf-dev ccache flex bison libssl-dev git zip unzip curl libncurses6 libncurses-dev
+        
+        # Tworzymy symlinki dla wstecznej kompatybilności z toolchainami, gdyby szukały libncurses.so.5
+        sudo ln -s /usr/lib/x86_64-linux-gnu/libncurses.so.6 /usr/lib/x86_64-linux-gnu/libncurses.so.5
+        sudo ln -s /usr/lib/x86_64-linux-gnu/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.5
 
     - name: Przygotowanie struktur i Toolchainów pod skrypt build_kernel.sh
       run: |
