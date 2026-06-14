@@ -38,6 +38,9 @@ jobs:
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "LC_ALL=C" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=Jarek" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=GitHub-Actions" >> $GITHUB_ENV
           echo "${{ github.workspace }}/clang/bin" >> $GITHUB_PATH
 
       - name: Clean Build Tree
@@ -46,14 +49,29 @@ jobs:
 
       - name: Configure Defconfig
         run: |
-          make O=out ARCH=arm64 vendor/a52sxq_eur_open_defconfig
+          make O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CC=clang \
+            REAL_CC=clang \
+            DTC_EXT=${{ github.workspace }}/tools/dtc \
+            CONFIG_BUILD_ARM64_DT_OVERLAY=y \
+            WERROR=0 \
+            CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y \
+            CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y \
+            CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y \
+            CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
+            vendor/a52sxq_eur_open_defconfig
 
       - name: Compile Kernel
         run: |
           make -j$(nproc) O=out \
             ARCH=arm64 \
-            CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CC=clang \
+            REAL_CC=clang \
             LD=ld.lld \
             AR=llvm-ar \
             NM=llvm-nm \
@@ -61,13 +79,19 @@ jobs:
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
             LLVM=1 LLVM_IAS=1 \
-            KCFLAGS="-Wno-error=strict-prototypes"
+            DTC_EXT=${{ github.workspace }}/tools/dtc \
+            CONFIG_BUILD_ARM64_DT_OVERLAY=y \
+            WERROR=0 \
+            CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y \
+            CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y \
+            CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y \
+            CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
+            LOCALVERSION="-Wonderful-0.1-exp-vanilla"
 
       - name: Package Output Artifacts
         run: |
           mkdir -p outpkg
           [ -f out/arch/arm64/boot/Image ] && cp out/arch/arm64/boot/Image outpkg/
-          [ -f out/arch/arm64/boot/Image.gz ] && cp out/arch/arm64/boot/Image.gz outpkg/
           [ -f out/arch/arm64/boot/dtbo.img ] && cp out/arch/arm64/boot/dtbo.img outpkg/
           
           cd outpkg
@@ -76,5 +100,5 @@ jobs:
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-a52s
+          name: WonderfulKernel-a52sxq
           path: outpkg/kernel.zip
