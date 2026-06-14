@@ -8,43 +8,47 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
         with:
           repository: danjekb/android_kernel_samsung_a52sxq
 
-      - name: Install deps
+      - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git curl zip unzip build-essential bc bison flex libssl-dev libelf-dev python3 gcc-aarch64-linux-gnu
+          sudo apt install -y git curl zip unzip build-essential bc bison flex libssl-dev libelf-dev python3 gcc-aarch64-linux-gnu lld llvm cpio
 
       - name: Cache Clang
+        id: cache-clang
         uses: actions/cache@v4
         with:
-          path: clang
+          path: ${{ github.workspace }}/clang
           key: clang-17.0.6-ubuntu22.04
 
-      - name: Clang setup
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Download and Setup Clang
+        if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          mkdir -p clang
-          cd clang
+          mkdir -p ${{ github.workspace }}/clang
+          cd ${{ github.workspace }}/clang
           curl -LO https://github.com/llvm/llvm-project/releases/download/llvmorg-17.0.6/clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-22.04.tar.xz
           tar -xf clang*.tar.xz --strip-components=1
+          rm clang*.tar.xz
 
-      - name: Set environment
+      - name: Set Environment Variables
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "SUBARCH=arm64" >> $GITHUB_ENV
-          echo "PATH=$GITHUB_WORKSPACE/clang/bin:$PATH" >> $GITHUB_ENV
+          echo "${{ github.workspace }}/clang/bin" >> $GITHUB_PATH
 
-      - name: Clean
-        run: make O=out mrproper || true
+      - name: Clean Build Tree
+        run: |
+          make O=out mrproper
 
-      - name: Defconfig
+      - name: Configure Defconfig
         run: |
           make O=out ARCH=arm64 vendor/a52sxq_eur_open_defconfig
 
-      - name: Build
+      - name: Compile Kernel
         run: |
           make -j$(nproc) O=out \
             ARCH=arm64 \
@@ -56,17 +60,20 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            LLVM=1 LLVM_IAS=1
+            LLVM=1 LLVM_IAS=1 \
+            KCFLAGS="-Wno-error=strict-prototypes"
 
-      - name: Package
+      - name: Package Output Artifacts
         run: |
           mkdir -p outpkg
-          cp out/arch/arm64/boot/Image* outpkg/ || true
-          cp out/arch/arm64/boot/dtbo.img outpkg/ || true
+          [ -f out/arch/arm64/boot/Image ] && cp out/arch/arm64/boot/Image outpkg/
+          [ -f out/arch/arm64/boot/Image.gz ] && cp out/arch/arm64/boot/Image.gz outpkg/
+          [ -f out/arch/arm64/boot/dtbo.img ] && cp out/arch/arm64/boot/dtbo.img outpkg/
+          
           cd outpkg
           zip -r kernel.zip .
 
-      - name: Upload
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-a52s
